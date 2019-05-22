@@ -75,7 +75,7 @@ void PHPCoroutine::shutdown()
         //wait thread
         if (pthread_join(pidt, NULL) < 0)
         {
-            swSysWarn("pthread_join(%ld) failed", (ulong_t )pidt);
+            swSysWarn("pthread_join(%ld) failed", (ulong_t) pidt);
         }
     }
 }
@@ -86,22 +86,21 @@ void PHPCoroutine::create_scheduler_thread()
     {
         return;
     }
-
     zend_vm_interrupt = &EG(vm_interrupt);
-    schedule_thread_created = true;
     if (pthread_create(&pidt, NULL, (void * (*)(void *)) schedule, NULL) < 0)
     {
         swSysError("pthread_create[PHPCoroutine Scheduler] failed");
     }
+    schedule_thread_created = true;
 }
 
 void PHPCoroutine::schedule()
 {
     swSignal_none();
-    int64_t interval_msec = (PHPCoroutine::MAX_EXEC_MSEC / 2) * 1000;
+    int64_t interval_msec = (MAX_EXEC_MSEC / 2) * 1000;
     while (SwooleG.running)
     {
-        if (PHPCoroutine::enable_preemptive_scheduler)
+        if (enable_preemptive_scheduler)
         {
             *zend_vm_interrupt = 1;
         }
@@ -351,7 +350,6 @@ void PHPCoroutine::create_func(void *arg)
     EG(exception) = NULL;
 
     save_vm_stack(task);
-    record_last_msec(task);
 
     task->output_ptr = NULL;
     task->co = Coroutine::get_current();
@@ -359,6 +357,9 @@ void PHPCoroutine::create_func(void *arg)
     task->defer_tasks = nullptr;
     task->pcid = task->co->get_origin_cid();
     task->context = nullptr;
+
+    task->last_msec = INT64_MAX;
+    record_last_msec(task);
 
     swTraceLog(
         SW_TRACE_COROUTINE, "Create coro id: %ld, origin cid: %ld, coro total count: %zu, heap size: %zu",
@@ -435,14 +436,20 @@ void PHPCoroutine::create_func(void *arg)
 
 long PHPCoroutine::create(zend_fcall_info_cache *fci_cache, uint32_t argc, zval *argv)
 {
+    if (enable_preemptive_scheduler)
+    {
+        create_scheduler_thread();
+    }
     if (unlikely(!active))
     {
         if (zend_hash_str_find_ptr(&module_registry, ZEND_STRL("xdebug")))
         {
             swoole_php_fatal_error(E_WARNING, "Using Xdebug in coroutines is extremely dangerous, please notice that it may lead to coredump!");
         }
+        // init reactor and register event wait
         php_swoole_check_reactor();
-        // PHPCoroutine::enable_hook(SW_HOOK_ALL); // TODO: enable it in version 4.3.0
+        // TODO: enable hook in v5.0.0
+        // enable_hook(SW_HOOK_ALL);
         active = true;
     }
     if (unlikely(Coroutine::count() >= max_num))
@@ -460,11 +467,6 @@ long PHPCoroutine::create(zend_fcall_info_cache *fci_cache, uint32_t argc, zval 
     {
         swoole_php_fatal_error(E_ERROR, "invalid function type %u", fci_cache->function_handler->type);
         return SW_CORO_ERR_INVALID;
-    }
-
-    if (PHPCoroutine::enable_preemptive_scheduler)
-    {
-        PHPCoroutine::create_scheduler_thread();
     }
 
     php_coro_args php_coro_args;

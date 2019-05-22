@@ -154,9 +154,6 @@ public:
     }
 
     static bool enable_preemptive_scheduler;
-    static void schedule();
-    static void create_scheduler_thread();
-
     static inline bool is_schedulable(php_coro_task *task)
     {
         return (swTimer_get_absolute_msec() - task->last_msec > MAX_EXEC_MSEC);
@@ -166,7 +163,6 @@ protected:
     static bool active;
     static uint64_t max_num;
     static php_coro_task main_task;
-    static bool schedule_thread_created;
 
     static inline void vm_stack_init(void);
     static inline void vm_stack_destroy(void);
@@ -180,9 +176,12 @@ protected:
     static void on_close(void *arg);
     static void create_func(void *arg);
 
+    static bool schedule_thread_created;
+    static void create_scheduler_thread();
+    static void schedule();
     static inline void record_last_msec(php_coro_task *task)
     {
-        if (enable_preemptive_scheduler)
+        if (schedule_thread_created)
         {
             task->last_msec = swTimer_get_absolute_msec();
         }
